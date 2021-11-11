@@ -1,0 +1,108 @@
+#!/usr/bin/env ruby
+
+
+def log(message)
+  now = Time.now.utc
+  puts "[#{now.to_s(:db)}.#{now.usec}] #{message}"
+end
+
+STDERR.sync = STDOUT.sync = true
+
+puts "Loading rails environment..."
+require_relative "../config/environment"
+require "benchmark/ips"
+require "sidekiq/cli"
+
+COUNT = (ARGV[0].presence || 100).to_i * 1000
+
+def clear_queue
+  Sidekiq::Queue.new(:benchmarks).clear
+end
+
+def queue_is_empty?
+  Sidekiq::Queue.new(:benchmarks).size == 0
+end
+
+def with_sidekiq
+  clear_queue
+  log "Starting sidekiq..."
+  pid = spawn("bundle e sidekiq -c 1 -q benchmarks", out: "/dev/null", err: "/dev/null")
+
+  log "Wait until Sidekiq worker is ready..."
+  ExampleJob.perform_later
+  loop do
+    break if queue_is_empty?
+    sleep 0.01
+  end
+  log "Sidekiq worker is now ready (pid: #{pid})"
+
+  yield
+ensure
+  log "Terminating sidekiq (pid = #{pid}) ..."
+  Process.kill("TERM", pid)
+end
+
+results = {}
+
+log "===== Enqueuing jobs"
+log "=== Warmup"
+ExampleJob.perform_later
+ExampleWorker.perform_async
+
+benchmark = "Enqueuing #{COUNT/1000}k ActiveJob jobs"
+log "=== #{benchmark}"
+clear_queue
+results[benchmark] = Benchmark.measure do
+  COUNT.times do |i|
+    ExampleJob.perform_later
+  end
+end.real.round(2)
+log "Duration: #{results[benchmark]} seconds"
+
+benchmark = "Enqueuing #{COUNT/1000}k native Sidekiq jobs"
+log "=== #{benchmark}"
+clear_queue
+results[benchmark] = Benchmark.measure do
+  COUNT.times do |i|
+    ExampleWorker.perform_async
+  end
+end.real.round(2)
+log "Duration: #{results[benchmark]} seconds"
+
+
+log "===== Enqueuing and processing jobs"
+benchmark = "Enqueuing & processing #{COUNT/1000}k ActiveJob jobs"
+log "=== #{benchmark}"
+with_sidekiq do
+  results[benchmark] = Benchmark.measure do
+    COUNT.times do
+      ExampleJob.perform_later
+    end
+    loop do
+      break if queue_is_empty?
+      sleep 0.1
+    end
+  end.real.round(2)
+end
+log "Duration: #{results[benchmark]} seconds"
+
+benchmark = "Enqueuing & processing #{COUNT/1000}k native Sidekiq jobs"
+log "=== #{benchmark}"
+with_sidekiq do
+  results[benchmark] = Benchmark.measure do
+    COUNT.times do
+      ExampleWorker.perform_async
+    end
+    loop do
+      break if queue_is_empty?
+      sleep 0.1
+    end
+  end.real.round(2)
+end
+log "Duration: #{results[benchmark]} seconds"
+
+puts "=" * 20
+puts "Results:"
+results.each do |metric, duration|
+  puts "#{metric} => #{duration}"
+end
