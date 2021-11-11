@@ -35,10 +35,10 @@ _Tested on a MacBook Pro (2.3 GHz Quad-Core Intel Core i7), with Ruby 3.0.2, Rai
 Using Sidekiq natively is at least 2x faster than using it wrapped in ActiveJob.
 There are also probably some memory usage gains too, although I didn't measure them.
 
-# Disclaimer
+# Disclaimers
 
-Benchmarks are inherently limited in how much they can reveal.  
+1. Benchmarks are inherently limited in how much they can reveal.<br>  
+  While using Sidekiq natively is most likely always going to be faster and lighter than wrapping it in ActiveJob, the performance gains may be negligible depending on what your app does.<br>  
+  For example, if all your jobs spend one second (it's long) performing SQL queries, processing 100k jobs (with 1 worker and 1 thread) will take 16min 40sec via ActiveJob, and only be ~1 second faster with native Sidekiq Workers.  
 
-While using Sidekiq natively is most likely always going to be faster and lighter than wrapping it in ActiveJob, the performance gains may be negligible depending on what your app does.  
-
-For example, if all your jobs spend one second (it's long) performing SQL queries, processing 100k jobs (with 1 worker and 1 thread) will take 16min 40sec via ActiveJob, and only be ~1 second faster with native Sidekiq Workers.
+2. These benchmarks do not use [Sidekiq's bulk queueing capabilities (`.push_bulk` / `.perform_bulk`)](https://github.com/mperham/sidekiq/wiki/Bulk-Queueing) on purpose, because the aim here is represent what happens with "a regular Rails app that gets a lot of activity suddenly".
